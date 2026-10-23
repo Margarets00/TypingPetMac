@@ -560,6 +560,22 @@ private struct TodoSettingsView: View {
                         Divider()
                         SettingsRow {
                             HStack(spacing: SettingsMetrics.space3) {
+                                Text("목록 보기")
+                                Spacer(minLength: SettingsMetrics.space3)
+                                Picker("", selection: Binding(get: { store.listStyle }, set: store.setListStyle)) {
+                                    Text("풀 뷰").tag(TodoListStyle.full)
+                                    Text("컴팩트 뷰").tag(TodoListStyle.compact)
+                                }
+                                .labelsHidden()
+                                .frame(width: 168)
+                            }
+                        }
+                        Divider()
+                        SettingsNote(text: "컴팩트 뷰는 할 일을 3개까지 한 줄씩만 보여 줘서 자리를 덜 차지해요. 체크는 바로 하고, 타이머는 할 일을 우클릭해서 시작하거나 멈춰요. 추가나 수정은 말풍선에 마우스를 올리면 나오는 ⤢ 버튼으로 풀 뷰를 열어서 해요.")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Divider()
+                        SettingsRow {
+                            HStack(spacing: SettingsMetrics.space3) {
                                 Text("표시 방식")
                                 Spacer(minLength: SettingsMetrics.space3)
                                 Picker("", selection: Binding(get: { store.bubbleVisibility }, set: store.setBubbleVisibility)) {

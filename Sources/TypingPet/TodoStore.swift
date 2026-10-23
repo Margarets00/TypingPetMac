@@ -30,6 +30,11 @@ enum TodoBubbleVisibility: String, CaseIterable {
     case always, hover
 }
 
+// How much of the list the bubble shows. Compact is a widget-sized summary for a bubble that stays open.
+enum TodoListStyle: String, CaseIterable {
+    case full, compact
+}
+
 // Seconds since the last keyboard, mouse, or trackpad input in this login session. Needs no permission.
 enum SystemIdle {
     static func seconds() -> Double {
@@ -64,6 +69,7 @@ final class TodoStore: ObservableObject {
     // Same model as the pet: opacity while the pointer is away, and while it is over the pet or bubble.
     @Published private(set) var bubbleRestingOpacity: Double
     @Published private(set) var bubbleHoverOpacity: Double
+    @Published private(set) var listStyle: TodoListStyle
     // Minutes without input before a running timer pauses itself. 0 turns this and the lock pause off.
     @Published private(set) var idleMinutes: Int
     @Published private(set) var absence: TodoAbsence?
@@ -83,6 +89,7 @@ final class TodoStore: ObservableObject {
     private static let visibilityKey = "todoBubbleVisibility"
     private static let restingOpacityKey = "todoBubbleRestingOpacity"
     private static let hoverOpacityKey = "todoBubbleHoverOpacity"
+    private static let listStyleKey = "todoListStyle"
     private static let idleMinutesKey = "todoIdleMinutes"
 
     init(url: URL = TodoFileStorage.defaultURL, defaults: UserDefaults = AppEnvironment.defaults, monotonicNow: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }, wallNow: @escaping () -> Date = Date.init, idleSeconds: @escaping () -> Double = SystemIdle.seconds) {
@@ -95,6 +102,7 @@ final class TodoStore: ObservableObject {
         bubbleVisibility = defaults.string(forKey: Self.visibilityKey).flatMap(TodoBubbleVisibility.init(rawValue:)) ?? .always
         bubbleRestingOpacity = (defaults.object(forKey: Self.restingOpacityKey) as? Double).map(Self.clampedOpacity) ?? 1
         bubbleHoverOpacity = (defaults.object(forKey: Self.hoverOpacityKey) as? Double).map(Self.clampedOpacity) ?? 1
+        listStyle = defaults.string(forKey: Self.listStyleKey).flatMap(TodoListStyle.init(rawValue:)) ?? .full
         self.monotonicNow = monotonicNow
         lastCheckpoint = monotonicNow()
         do {
@@ -104,7 +112,8 @@ final class TodoStore: ObservableObject {
             loadBlocked = true
             errorMessage = "할 일 기록을 읽지 못했어요. 원본 파일은 그대로 두었어요. \(error.localizedDescription)"
         }
-        if engine.activeSession != nil { expanded = false }
+        // The compact list shows the active Todo with its timer, so it stays open; the full list folds into the focus bubble.
+        if engine.activeSession != nil { expanded = listStyle == .compact }
         if !loadBlocked { persist() }
     }
     func change(_ operation: (inout FocusTimerEngine) -> Void) {
@@ -131,7 +140,8 @@ final class TodoStore: ObservableObject {
     }
     func pauseForSleepOrTermination() { change { $0.pause() } }
     private func didExpire() {
-        expanded = false
+        // The compact list shows the ending in its own bubble without folding, so an extension returns to the list.
+        if listStyle == .full { expanded = false }
         requestAttention()
     }
     // Bounce now, and again at the next input when the user seems away and may have missed it.
@@ -209,6 +219,11 @@ final class TodoStore: ObservableObject {
         guard value != bubbleVisibility else { return }
         bubbleVisibility = value
         defaults.set(value.rawValue, forKey: Self.visibilityKey)
+    }
+    func setListStyle(_ value: TodoListStyle) {
+        guard value != listStyle else { return }
+        listStyle = value
+        defaults.set(value.rawValue, forKey: Self.listStyleKey)
     }
     func setBubbleRestingOpacity(_ value: Double) {
         let value = Self.clampedOpacity(value)

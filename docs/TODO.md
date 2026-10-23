@@ -59,6 +59,23 @@ A bubble at 0% passes clicks through until the pointer shows it again.
 Typing, an open popover or menu, an expired countdown, and save errors keep the bubble visible and fully opaque.
 Size and visibility are stored in the app preferences, not in the Todo record.
 
+### Compact view
+
+A bubble that stays open can take less room. The header button ⤡ or Settings > `할 일` > `목록 보기` switches the list to the compact view.
+The compact view is 260 points wide and shows only up to three open Todos, one line each, with their checkboxes.
+The active Todo comes first with its timer. More Todos show as `+N개 더`, which opens the full view.
+It has no header: on hover, ⤢ (full view) and ⌄ (back to the focus bubble, while a timer is active) appear in the top-right corner.
+The context menu has the same actions.
+Right-click a Todo to control its timer from the compact view.
+The active Todo offers `일시정지` or `재개` and `종료`. Another Todo offers its saved setting, count-up, and 20 minutes,
+without repeating the saved one. A chosen setting becomes the Todo's setting, as in the full view's timer popover.
+Starting a Todo while another timer runs asks for confirmation inside the compact bubble.
+A timer started from the compact view keeps the compact view, with the active Todo and its time on top.
+An ending or an absence needs more room, so it shows its own bubble until answered, then the compact view returns.
+After a restart with an active session, the compact view stays open too.
+Adding, editing, deleting, and custom durations happen in the full view.
+The choice is stored with the other display preferences. Switching saves a title being edited.
+
 ## Use a timer
 
 Each Todo starts with a 20-minute setting. The main button starts the selected setting.
@@ -66,7 +83,7 @@ The arrow opens a popover. Select 10, 20, or 30 minutes, a custom duration, or c
 Custom durations use whole minutes from 1 through 999. Selecting a setting does not start a timer.
 Each Todo keeps its own setting.
 
-Starting a timer opens the compact focus view. It shows the title, a tomato, and the timer.
+Starting a timer from the full view opens the compact focus view. It shows the title, a tomato, and the timer.
 The ring around the tomato shows the remaining countdown. Count-up has no limit, so it shows the tomato alone in the same place.
 A paused timer shows a gray tomato and `일시정지`.
 Move the pointer over the view to show pause, resume, and stop controls.

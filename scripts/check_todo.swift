@@ -244,7 +244,7 @@ struct TodoChecks {
             let bottomLeft = TodoBubbleGeometry.placement(content: content, tail: 10, pet: cases[0].0, visible: screen, gap: 2)
             try check(bottomLeft.frame.height == 310 && bottomLeft.tailOffset < 0, "Tail does not point back at a corner pet")
         }
-        try test("Zoom snaps to browser steps and display preferences persist") {
+        try test("Zoom snaps to browser steps and display preferences, including the list style, persist") {
             try check(TodoBubbleZoom.larger(than: 1) == 1.1 && TodoBubbleZoom.smaller(than: 1) == 0.9, "Wrong neighbor steps")
             try check(TodoBubbleZoom.larger(than: 2) == 2 && TodoBubbleZoom.smaller(than: 0.8) == 0.8, "Zoom left its range")
             try check(TodoBubbleZoom.normalized(1.3) == 1.25 && TodoBubbleZoom.normalized(0) == 0.8, "Zoom did not snap")
@@ -253,8 +253,11 @@ struct TodoChecks {
             let url = folder.appendingPathComponent("display.json")
             var store = TodoStore(url: url, defaults: defaults)
             try check(store.zoom == 1 && store.bubbleVisibility == .always && store.bubbleRestingOpacity == 1 && store.bubbleHoverOpacity == 1, "Wrong display defaults")
+            try check(store.listStyle == .full, "The list does not start in the full view")
             store.zoomIn(); store.zoomIn(); store.setBubbleVisibility(.hover); store.setBubbleRestingOpacity(-1); store.setBubbleHoverOpacity(0.4)
+            store.setListStyle(.compact)
             store = TodoStore(url: url, defaults: defaults)
+            try check(store.listStyle == .compact, "Compact view not restored")
             try check(store.zoom == 1.25 && store.zoomPercent == 125, "Zoom not restored")
             try check(store.bubbleVisibility == .hover && store.bubbleRestingOpacity == 0 && store.bubbleHoverOpacity == 0.4, "Visibility or opacity not restored, or not clamped")
             let record = try TodoFileStorage(url: url).load()
@@ -405,6 +408,28 @@ struct TodoChecks {
             store.change { $0.resume() }
             idle = 1; store.screenDidLock(); c.advance(30); store.change { $0.finish() }; store.screenDidUnlock(); store.tick()
             try check(store.attentionRequest == 4, "Hopped for a notice already answered")
+        }
+        try test("A compact list stays open while a timer runs, ends, and survives a relaunch") {
+            let c = Clock()
+            let suite = "TypingPetChecks-\(UUID().uuidString)"; let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let url = folder.appendingPathComponent("compact.json")
+            @MainActor func open() -> TodoStore { TodoStore(url: url, defaults: defaults, monotonicNow: { c.uptime }, wallNow: { c.date }, idleSeconds: { 0 }) }
+            var store = open()
+            store.setListStyle(.compact)
+            store.change { let id = $0.addTodo("Work")!; $0.start(id) }
+            store.expanded = true
+            c.advance(1200); store.tick()
+            try check(store.engine.activeSession?.status == .expired && store.expanded, "The compact list folded when the countdown ended")
+            store.change { $0.extend(minutes: 10) }
+            store = open()
+            try check(store.engine.activeSession?.status == .paused && store.expanded, "A relaunch folded the compact list")
+            store.setListStyle(.full)
+            store = open()
+            try check(!store.expanded, "A relaunch kept the full list open over a timer")
+            store.change { $0.resume() }; store.expanded = true
+            c.advance(600); store.tick()
+            try check(store.engine.activeSession?.status == .expired && !store.expanded, "The full list did not fold when the countdown ended")
         }
         try test("Existing opacity, pointer avoidance, and resize geometry") {
             try check(PetOpacityBehavior.opacity(isHovering: true, restingOpacity: 1, hoverOpacity: 0.25) == 0.25, "Opacity changed")

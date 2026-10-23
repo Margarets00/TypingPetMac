@@ -327,6 +327,30 @@ final class TodoPersistenceTests: XCTestCase {
         XCTAssertTrue(store.attentionRequest == 4, "Hopped for a notice already answered")
     }
 
+    @MainActor func testCompactListStaysOpenWhileATimerRunsEndsAndRelaunches() throws {
+        let c = TestClock()
+        let suite = "TypingPetTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let url = try temporaryFile()
+        @MainActor func open() -> TodoStore { TodoStore(url: url, defaults: defaults, monotonicNow: { c.uptime }, wallNow: { c.date }, idleSeconds: { 0 }) }
+        var store = open()
+        store.setListStyle(.compact)
+        store.change { let id = $0.addTodo("Work")!; $0.start(id) }
+        store.expanded = true
+        c.advance(1200); store.tick()
+        XCTAssertTrue(store.engine.activeSession?.status == .expired && store.expanded, "The compact list folded when the countdown ended")
+        store.change { $0.extend(minutes: 10) }
+        store = open()
+        XCTAssertTrue(store.engine.activeSession?.status == .paused && store.expanded, "A relaunch folded the compact list")
+        store.setListStyle(.full)
+        store = open()
+        XCTAssertTrue(!store.expanded, "A relaunch kept the full list open over a timer")
+        store.change { $0.resume() }; store.expanded = true
+        c.advance(600); store.tick()
+        XCTAssertTrue(store.engine.activeSession?.status == .expired && !store.expanded, "The full list did not fold when the countdown ended")
+    }
+
     func testInvalidTotalsAndSessionReferencesAreRejected() throws {
         let c = TestClock(); var e = c.engine(); let id = e.addTodo("Work")!
         e.start(id); c.advance(60); e.finish()

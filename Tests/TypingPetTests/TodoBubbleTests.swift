@@ -69,8 +69,11 @@ final class TodoBubbleTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("display-\(UUID()).json")
         var store = TodoStore(url: url, defaults: defaults)
+        XCTAssertEqual(store.listStyle, .full)
         store.zoomIn(); store.setBubbleVisibility(.hover); store.setBubbleRestingOpacity(0.4); store.setBubbleHoverOpacity(0.7)
+        store.setListStyle(.compact)
         store = TodoStore(url: url, defaults: defaults)
+        XCTAssertEqual(store.listStyle, .compact)
         XCTAssertEqual(store.zoom, 1.1)
         XCTAssertEqual(store.bubbleVisibility, .hover)
         XCTAssertEqual(store.bubbleRestingOpacity, 0.4, accuracy: 0.0001)

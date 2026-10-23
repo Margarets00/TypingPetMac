@@ -8,6 +8,10 @@ private enum TodoTimeText {
         if value >= 3600 { return String(format: "%d:%02d:%02d", value / 3600, value / 60 % 60, value % 60) }
         return String(format: "%02d:%02d", value / 60, value % 60)
     }
+    // Same wording as the timer button in the full view.
+    static func start(_ preference: TimerPreference) -> String {
+        preference.mode == .countup ? "카운트업 시작" : "\(Int((preference.seconds ?? 1200) / 60))분 시작"
+    }
     static func total(_ seconds: Double) -> String {
         let minutes = Int(max(0, seconds)) / 60
         if minutes < 60 { return "누적 \(minutes)분" }
@@ -120,22 +124,28 @@ struct TodoBubbleView: View {
     @State private var listContentHeight: CGFloat = 0
     @State private var focusHovering = false
     @State private var addHovering = false
+    @State private var compactHovering = false
     @State private var zoomBadgeVisible = false
     @State private var zoomBadgeToken = 0
     @State private var hops: CGFloat = 0
     @FocusState private var addFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private enum Mode { case list, focus, away, expired }
+    private enum Mode { case list, compactList, focus, away, expired }
     static let motion = Animation.spring(response: 0.34, dampingFraction: 0.86)
 
     private var zoom: CGFloat { CGFloat(store.zoom) }
     private var z: Z { Z(zoom: zoom) }
     private var session: FocusSession? { store.engine.activeSession }
     private var mode: Mode {
-        guard let session, !store.expanded else { return .list }
+        let list: Mode = store.listStyle == .compact ? .compactList : .list
+        guard let session else { return list }
+        // The full list's active card has room for an ending or an absence. The compact list does not,
+        // so those show their own bubble until answered, then the compact list returns.
+        if store.expanded, store.listStyle == .full { return .list }
         if session.status == .expired { return .expired }
-        return store.absence == nil ? .focus : .away
+        if store.absence != nil { return .away }
+        return store.expanded ? list : .focus
     }
     private var paused: Bool { session?.status == .paused }
     private var expired: Bool { session?.status == .expired }
@@ -213,11 +223,11 @@ struct TodoBubbleView: View {
 
     // One view for every mode, so switching modes runs only the mode transition below.
     private var sizedContent: some View {
-        // Error text needs a fixed width to wrap.
-        let fixedWidth = store.errorMessage != nil || mode == .list
+        // Error text needs a fixed width to wrap. Compact titles truncate at a narrower fixed width.
+        let width: CGFloat? = store.errorMessage != nil || mode == .list ? z(320) : (mode == .compactList ? z(260) : nil)
         return modeContent
-            .frame(width: fixedWidth ? z(320) : nil)
-            .fixedSize(horizontal: !fixedWidth, vertical: true)
+            .frame(width: width)
+            .fixedSize(horizontal: width == nil, vertical: true)
     }
 
     @ViewBuilder private var modeContent: some View {
@@ -226,6 +236,7 @@ struct TodoBubbleView: View {
             if !store.loadBlocked {
                 switch mode {
                 case .list: listView.transition(modeTransition)
+                case .compactList: compactListView.transition(modeTransition)
                 case .focus: focusView.transition(modeTransition)
                 case .away: awayView.transition(modeTransition)
                 case .expired: expiredView.transition(modeTransition)
@@ -354,6 +365,7 @@ struct TodoBubbleView: View {
             if session != nil {
                 IconButton(symbol: "chevron.down", label: "집중 말풍선으로 접기") { setExpanded(false) }
             }
+            IconButton(symbol: "arrow.down.right.and.arrow.up.left", label: "컴팩트 뷰로 보기") { setListStyle(.compact) }
             zoomMenu
             IconButton(symbol: "minus", label: "할 일 숨기기") { store.hide() }
         }
@@ -438,6 +450,122 @@ struct TodoBubbleView: View {
             },
             onCancelDelete: { pendingDelete = nil }
         )
+    }
+
+    // MARK: Compact list
+
+    // Widget-sized: up to three Todos with checkboxes and nothing else.
+    // The controls appear on hover, like the focus bubble's. Adding, editing, and timers are in the full view.
+    private var compactListView: some View {
+        let open = Array(store.engine.openTodos.reversed())
+        // The active Todo leads, so the timer's subject stays in view.
+        let ordered = open.filter { $0.id == session?.todoId } + open.filter { $0.id != session?.todoId }
+        let shown = Array(ordered.prefix(3))
+        let allDone = open.isEmpty && !store.engine.completedToday().isEmpty
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(shown) { todo in compactRow(todo).transition(rowTransition) }
+            if open.count > shown.count {
+                Button { setListStyle(.full) } label: {
+                    Text("+\(open.count - shown.count)개 더").font(z.font(11.5, .medium)).foregroundStyle(BubbleColor.muted)
+                        .monospacedDigit().contentTransition(.identity)
+                        .padding(.leading, z(34)).frame(maxWidth: .infinity, minHeight: z(24), alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .help("풀 뷰에서 모두 보기")
+                .transition(.opacity)
+            }
+            if open.isEmpty {
+                Button {
+                    setListStyle(.full)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { focusInput() }
+                } label: {
+                    HStack(spacing: z(8)) {
+                        Image(systemName: allDone ? "checkmark" : "plus").font(z.font(11, .semibold)).frame(width: z(20))
+                        Text(allDone ? "오늘 할 일을 모두 끝냈어요" : "오늘 할 일 추가하기").font(z.font(12.5))
+                    }
+                    .foregroundStyle(BubbleColor.muted)
+                    .padding(.horizontal, z(6)).frame(maxWidth: .infinity, minHeight: z(28), alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .help("풀 뷰에서 할 일 추가하기")
+                .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, z(8)).padding(.vertical, z(8))
+        .pointerHover { compactHovering = $0 }
+        .overlay(alignment: .topTrailing) {
+            if compactHovering {
+                HStack(spacing: z(2)) {
+                    if session != nil {
+                        IconButton(symbol: "chevron.down", label: "집중 말풍선으로 접기", size: 22) { setExpanded(false) }
+                    }
+                    IconButton(symbol: "arrow.up.left.and.arrow.down.right", label: "풀 뷰로 보기", size: 22) { setListStyle(.full) }
+                }
+                // Wide enough to cover the active Todo's clock in the first row.
+                .padding(.leading, z(44)).padding(.trailing, z(8)).padding(.vertical, z(9))
+                .background(LinearGradient(stops: [
+                    .init(color: BubbleColor.surface.opacity(0), location: 0),
+                    .init(color: BubbleColor.surface, location: 0.4)
+                ], startPoint: .leading, endPoint: .trailing))
+                .transition(.opacity)
+            }
+        }
+        // Starting a Todo while another timer runs asks first, as in the full view.
+        .frame(minHeight: pendingStart == nil ? 0 : z(190), alignment: .top)
+        .overlay { if let id = pendingStart { switchConfirmation(id) } }
+        .animation(.easeOut(duration: 0.15), value: compactHovering)
+        .contextMenu {
+            Button("풀 뷰로 보기") { setListStyle(.full) }
+            if session != nil { Button("집중 말풍선으로 접기") { setExpanded(false) } }
+            Button("할 일 숨기기") { store.hide() }
+        }
+        .accessibilityAction(named: "풀 뷰로 보기") { setListStyle(.full) }
+    }
+
+    private func compactRow(_ todo: TodoItem) -> some View {
+        let checked = completing.contains(todo.id)
+        let active = session?.todoId == todo.id
+        return HStack(spacing: z(8)) {
+            CheckCircle(checked: checked, label: "\(todo.title) 완료") { toggle(todo, completed: false) }
+            Text(todo.title).font(z.font(12.5)).foregroundStyle(checked ? BubbleColor.muted : BubbleColor.ink)
+                .lineLimit(1).truncationMode(.tail).help(todo.title)
+            Spacer(minLength: z(4))
+            if active {
+                HStack(spacing: z(4)) {
+                    Circle().fill(paused ? BubbleColor.faint : BubbleColor.tomato).frame(width: z(5), height: z(5))
+                    Text(clockText).font(z.font(11, .semibold, .rounded)).monospacedDigit()
+                        .foregroundStyle(paused ? BubbleColor.muted : BubbleColor.tomato)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(paused ? "일시정지 \(clockText)" : "집중 중 \(clockText)")
+            }
+        }
+        .padding(.horizontal, z(6)).frame(minHeight: z(28))
+        .contentShape(Rectangle())
+        .contextMenu { compactMenu(todo) }
+    }
+
+    // Right-click controls the timer without opening the full view:
+    // pause or stop the running Todo, or start another with its saved setting, count-up, or 20 minutes.
+    @ViewBuilder private func compactMenu(_ todo: TodoItem) -> some View {
+        if session?.todoId == todo.id {
+            if expired {
+                Button("끝내기") { finish() }
+            } else {
+                Button(paused ? "재개" : "일시정지") { togglePause() }
+                Button("종료") { finish() }
+            }
+        } else {
+            let others = [TimerPreference.countup, TimerPreference(seconds: 1200)].filter { $0 != todo.timerPreference }
+            ForEach(Array(([todo.timerPreference] + others).enumerated()), id: \.offset) { _, preference in
+                Button(TodoTimeText.start(preference)) { startFromMenu(todo, with: preference) }
+            }
+        }
+        Divider()
+        Button("완료") { toggle(todo, completed: false) }
+        Button("풀 뷰로 보기") { setListStyle(.full) }
     }
 
     private func emptyState(hasCompleted: Bool) -> some View {
@@ -618,7 +746,8 @@ struct TodoBubbleView: View {
         }
         .padding(.horizontal, z(14)).padding(.vertical, z(13))
         .contextMenu {
-            Button("목록 펼치기") { setExpanded(true) }
+            // The compact list cannot show an ending or an absence, so it comes back once they are answered.
+            if store.listStyle == .full { Button("목록 펼치기") { setExpanded(true) } }
             Button("할 일 숨기기") { store.hide() }
         }
     }
@@ -644,7 +773,8 @@ struct TodoBubbleView: View {
         }
         .padding(.horizontal, z(14)).padding(.vertical, z(13))
         .contextMenu {
-            Button("목록 펼치기") { setExpanded(true) }
+            // The compact list cannot show an ending or an absence, so it comes back once they are answered.
+            if store.listStyle == .full { Button("목록 펼치기") { setExpanded(true) } }
             Button("할 일 숨기기") { store.hide() }
         }
     }
@@ -710,6 +840,14 @@ struct TodoBubbleView: View {
     private func setExpanded(_ value: Bool) {
         withAnimation(Self.motion) { store.expanded = value }
     }
+    private func setListStyle(_ style: TodoListStyle) {
+        // Save a title being edited before its field goes away.
+        if editingID != nil { layout.window?.makeFirstResponder(nil) }
+        addFocused = false
+        pendingStart = nil
+        pendingDelete = nil
+        withAnimation(Self.motion) { store.setListStyle(style) }
+    }
     private func focusInput() {
         layout.window?.makeKey()
         addFocused = true
@@ -758,6 +896,11 @@ struct TodoBubbleView: View {
             if engine.activeSession?.status == .paused { engine.resume() } else { engine.pause() }
         }
     }
+    // The menu choice becomes the Todo's setting, the same as choosing it in the full view's timer popover.
+    private func startFromMenu(_ todo: TodoItem, with preference: TimerPreference) {
+        if preference != todo.timerPreference { store.change { $0.setPreference(preference, for: todo.id) } }
+        requestStart(todo.id)
+    }
     private func requestStart(_ id: UUID) {
         if let current = session, current.todoId != id { withAnimation(.easeOut(duration: 0.15)) { pendingStart = id } }
         else { start(id, confirmed: false) }
@@ -768,7 +911,8 @@ struct TodoBubbleView: View {
         withAnimation(Self.motion) {
             var started = false
             store.change { started = $0.start(id, replaceActive: confirmed) }
-            if started { store.expanded = false }
+            // A compact list keeps showing the Todo with its timer; the full list folds into the focus bubble.
+            if started { store.expanded = store.listStyle == .compact }
         }
     }
     private func finish() {
